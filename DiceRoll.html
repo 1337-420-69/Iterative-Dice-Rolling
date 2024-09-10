@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iterative Dice Rolling Simulation</title>
+    
+    <!-- Google Fonts - Oswald -->
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Oswald', sans-serif;
+            background-color: #000000;
+            color: #FFFFFF;
+            padding: 20px;
+            text-align: center;
+            background-image: url('Engine256.png');
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+        h1, label, .result, button, p {
+            font-family: 'Oswald', sans-serif;
+            font-weight: bold;
+        }
+        .result {
+            font-size: 1.5em;
+            margin: 10px 0;
+        }
+        #positive {
+            color: #FF00FF; /* Magenta for positive results */
+        }
+        #negative {
+            color: #00FF00; /* Bright green for negative results */
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            margin-top: 10px;
+            cursor: pointer;
+            background-color: #FFFFFF;
+            color: #000000;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+        }
+        .visualization {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+        }
+        .bar {
+            width: 20px;
+            height: 100px;
+            margin: 0 5px;
+            transition: height 0.5s ease;
+        }
+        #progressBar {
+            margin: 20px 0;
+            width: 100%;
+            height: 20px;
+            background-color: #00FF00;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        #progressFill {
+            height: 100%;
+            background-color: #FF00FF;
+            width: 0%;
+        }
+        #successIcon, #failureIcon {
+            display: none;
+            font-size: 3em;
+        }
+        #successIcon {
+            color: #FF00FF; /* Magenta for success */
+        }
+        #failureIcon {
+            color: #00FF00; /* Green for failure */
+        }
+    </style>
+</head>
+<body>
+    <h1>Iterative Dice Rolling Simulation</h1>
+    
+    <label for="iterations">Number of Iterations:</label>
+    <input type="number" id="iterations" min="1" value="7"><br><br>
+
+    <label for="oddsMinus">Weight for -0.5:</label>
+    <input type="number" id="oddsMinus" value="1"><br><br>
+
+    <label for="oddsPlus">Weight for +0.5:</label>
+    <input type="number" id="oddsPlus" value="1"><br><br>
+
+    <label for="threshold">Calculated Value to Overcome for Success:</label>
+    <input type="text" id="threshold" readonly><br><br>
+    
+    <label for="indefinite">Enable Indefinite Iterations:</label>
+    <input type="checkbox" id="indefinite"><br><br>
+    
+    <button onclick="startSimulation()">Start Simulation</button>
+
+    <div id="progressBar">
+        <div id="progressFill"></div>
+    </div>
+
+    <div id="output"></div>
+    <div class="visualization" id="visualization"></div>
+    
+    <div id="successIcon">🏆</div>
+    <div id="failureIcon">❌</div>
+
+    <script>
+        function calculateThreshold() {
+            const oddsMinus = parseFloat(document.getElementById('oddsMinus').value);
+            const oddsPlus = parseFloat(document.getElementById('oddsPlus').value);
+
+            // Weights can be any value (positive or negative), we calculate based on magnitude.
+            // No need to ensure they sum to 1.
+            const totalWeight = Math.abs(oddsMinus) + Math.abs(oddsPlus);
+
+            // Calculate normalized probabilities from the weights
+            const probabilityMinus = Math.abs(oddsMinus) / totalWeight;
+            const probabilityPlus = Math.abs(oddsPlus) / totalWeight;
+
+            // Example threshold calculation: difference in weighted outcomes
+            const threshold = (probabilityPlus - probabilityMinus).toFixed(8);
+            document.getElementById('threshold').value = threshold;
+        }
+
+        // Call calculateThreshold initially and when inputs change
+        document.getElementById('oddsMinus').addEventListener('input', calculateThreshold);
+        document.getElementById('oddsPlus').addEventListener('input', calculateThreshold);
+        calculateThreshold(); // Initialize threshold on page load
+
+        async function startSimulation() {
+            const iterations = parseInt(document.getElementById('iterations').value);
+            const threshold = parseFloat(document.getElementById('threshold').value);
+            const indefinite = document.getElementById('indefinite').checked;
+            let result = rollDice();
+            let output = document.getElementById('output');
+            let visualization = document.getElementById('visualization');
+            let progressFill = document.getElementById('progressFill');
+            let successIcon = document.getElementById('successIcon');
+            let failureIcon = document.getElementById('failureIcon');
+            let streakPositive = result > 0;
+            let streakBroken = false;
+
+            output.innerHTML = '';  // Clear previous results
+            visualization.innerHTML = ''; // Clear previous visualizations
+            progressFill.style.width = '0%';  // Reset progress bar
+            successIcon.style.display = 'none';
+            failureIcon.style.display = 'none';
+
+            // Initial result from the first roll (+0.5 or -0.5)
+            let refinedResult = result;
+            let refinementMirror = result;
+            let stepByStepOutput = `<div class="result" id="${result >= 0 ? 'positive' : 'negative'}">Initial Roll: ${refinedResult}</div>`;
+            
+            // Create bar elements for visualization
+            let barElement = document.createElement('div');
+            barElement.className = 'bar';
+            barElement.style.height = `${50 + refinedResult * 25}px`; // Height proportional to the value
+            barElement.style.backgroundColor = refinementMirror >= 0 ? '#FF00FF' : '#00FF00'; // Bar color based on result polarity
+            visualization.appendChild(barElement);
+
+            // Iterative process, either fixed number of iterations or until streak is broken
+            let maxIterations = indefinite ? 1000 : iterations; // Limit indefinite runs to 1000 iterations
+            for (let i = 1; i < maxIterations && !streakBroken; i++) {
+                let refinement = rollDice() / Math.pow(2, i);  // Refines by half each iteration
+                refinedResult += refinement;
+                refinementMirror = refinement;
+                stepByStepOutput += `<div class="result" id="${refinementMirror >= 0 ? 'positive' : 'negative'}">Iteration ${i + 1}: ${refinement.toFixed(8)}, Cumulative: ${refinedResult.toFixed(8)}</div>`;
+
+                // Add delay before each iteration
+                await delay(500); // 500ms delay between iterations
+
+                // Update visualization
+                let barElement = document.createElement('div');
+                barElement.className = 'bar';
+                barElement.style.height = `${50 + refinedResult * 25}px`; // Height proportional to the value
+                barElement.style.backgroundColor = refinementMirror >= 0 ? '#FF00FF' : '#00FF00'; // Bar color based on result polarity
+                visualization.appendChild(barElement);
+
+                // Animate the progress bar
+                progressFill.style.width = `${(refinedResult + 1) * 50}%`;
+
+                // Check if streak is broken (indefinite option)
+                if (indefinite) {
+                    let currentPositive = refinementMirror > 0;
+                    if (currentPositive !== streakPositive) {
+                        streakBroken = true;  // Stop when the streak is broken
+                    }
+                }
+            }
+
+            // Display the step-by-step results
+            output.innerHTML = stepByStepOutput;
+            
+            // Check for success or failure and show icon
+            if (refinedResult >= threshold) {
+                successIcon.style.display = 'block';  // Show success trophy
+                output.innerHTML += `<p style="color: #FF00FF;"><strong>Success!</strong> Final Value: ${refinedResult.toFixed(8)} (>= ${threshold})</p>`;
+            } else {
+                failureIcon.style.display = 'block';  // Show failure X
+                output.innerHTML += `<p style="color: #00FF00;"><strong>Failure!</strong> Final Value: ${refinedResult.toFixed(8)} (< ${threshold})</p>`;
+            }
+        }
+
+        function rollDice() {
+            const oddsMinus = parseFloat(document.getElementById('oddsMinus').value);
+            const oddsPlus = parseFloat(document.getElementById('oddsPlus').value);
+            const totalWeight = Math.abs(oddsMinus) + Math.abs(oddsPlus);
+
+            // Normalize to get the probability of rolling -0.5 or +0.5
+            const probabilityMinus = Math.abs(oddsMinus) / totalWeight;
+
+            // Simulate dice roll
+            return Math.random() < 0.5 ? -0.5 : 0.5;
+        }
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+    </script>
+</body>
+</html>
+
